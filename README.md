@@ -1,5 +1,7 @@
 # Avalon · The Round Table
 
+**Play now: https://tristanmatthias.github.io/avalon/**
+
 A mobile-first, peer-to-peer web version of **The Resistance: Avalon** for 5–10 players. One person creates a game and shares the link (or QR code). Everyone else opens it on their phone, enters a name and takes a seat. There's no backend or account, and nothing to install.
 
 ## Features
@@ -47,7 +49,7 @@ npm run build    # static site in dist/
 
 ## Deploying to GitHub Pages
 
-`.github/workflows/pages.yml` runs the tests, builds the site and publishes it whenever the repository's default branch is pushed.
+`.github/workflows/pages.yml` runs the tests, builds the site and publishes it whenever the repository's default branch is pushed (other branches only build and test).
 
 One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Pages for private repositories needs a paid GitHub plan. Otherwise, make the repo public.
 

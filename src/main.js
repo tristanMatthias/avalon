@@ -62,12 +62,31 @@ function screen() {
   if (session.kicked) return shell(`<div class="scroll center"><h2>You have been dismissed</h2><p>The host removed you from this table.</p><button class="btn" data-a="home">Return to Camelot</button></div>`)
   const v = session.view
   if (!session.isHost && !session.name) return joinScreen()
-  if (!v) return shell(`<div class="center-msg"><div class="spinner"></div><h2>Seeking the host…</h2><p>Connecting peer-to-peer. Make sure the person who created the game still has it open.</p><button class="btn ghost small" data-a="leave">Leave</button></div>`)
+  if (!v) return shell(`<div class="center-msg"><div class="spinner"></div><h2>Seeking the host…</h2><p>Connecting peer-to-peer. Make sure the person who created the game still has it open, with their screen on.</p>${netStatus()}<button class="btn ghost small" data-a="leave">Leave</button></div>`)
   syncUi(v)
   return v.phase === 'lobby' ? lobbyScreen(v) : gameScreen(v)
 }
 
 const shell = (inner, cls = '') => `<main class="shell ${cls}">${inner}${toast()}</main>`
+
+// Connection diagnostics, so "stuck" has an explanation
+function netStatus() {
+  const st = session?.stats?.()
+  if (!st) return ''
+  const secs = Math.round((Date.now() - (session.openedAt ?? Date.now())) / 1000)
+  let msg
+  if (st.relaysOpen === 0) {
+    msg = secs < 8
+      ? 'Contacting signalling servers…'
+      : 'Can’t reach any signalling servers. Check your internet connection, or try mobile data instead of this Wi-Fi (some networks block them).'
+  } else if (st.peers === 0) {
+    msg = `Connected to ${st.relaysOpen}/${st.relaysTotal} signalling servers. Waiting for the host’s phone to answer…`
+  } else {
+    msg = `Found ${st.peers} player${st.peers === 1 ? '' : 's'}, waiting for the host…`
+  }
+  const err = session.netError ? `<p class="net-err">Found another player but couldn’t open a direct connection. Try putting everyone on the same Wi-Fi.</p>` : ''
+  return `<p class="net-status">${msg}</p>${err}`
+}
 
 function toast() {
   const bits = []
@@ -104,6 +123,13 @@ function homeScreen() {
       <summary>How to play</summary>
       ${rulesHtml()}
     </details>`, 'home')
+}
+
+function hostSignal() {
+  const st = session?.stats?.()
+  if (!st || new URLSearchParams(location.search).has('local')) return ''
+  const ok = st.relaysOpen > 0
+  return `<p class="signal ${ok ? 'ok' : 'bad'}"><span class="dot"></span>${ok ? `Open for players · ${st.relaysOpen}/${st.relaysTotal} signalling servers` : 'Connecting to signalling servers…'}</p>`
 }
 
 function joinScreen() {
@@ -150,6 +176,7 @@ function lobbyScreen(v) {
     <section class="scroll">
       <h2>Gather your knights</h2>
       <p class="fine">Share this link or let friends scan the code.</p>
+      ${hostSignal()}
       <div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })}</div>
       <div class="link-row">
         <input readonly value="${esc(url)}" aria-label="Game link">
@@ -557,6 +584,12 @@ window.avalon = { get session() { return session } }
 
 addEventListener('hashchange', boot)
 boot()
+
+// Refresh connection diagnostics while nobody's playing yet
+setInterval(() => {
+  const v = session?.view
+  if (session && (!v || v.phase === 'lobby' || session.status === 'host-lost')) render()
+}, 2000)
 
 // Keep phones awake while in a game — a sleeping host drops everyone's connection
 let wakeLock = null

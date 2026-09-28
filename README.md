@@ -28,13 +28,19 @@ A mobile-first, peer-to-peer web version of **The Resistance: Avalon** for 5–1
 ```
 
 1. **Room link.** The game link is `https://…/#<room-id>`. The room ID is 10 random characters and never leaves the URL fragment, so it isn't sent to any web server.
-2. **Finding each other.** [Trystero](https://github.com/dmotz/trystero) uses public Nostr relays only to exchange WebRTC connection offers. Those offers are encrypted with the room ID as the password, so the relays can't read them. After that, all game traffic goes directly between phones over encrypted WebRTC data channels.
+2. **Finding each other.** [Trystero](https://github.com/dmotz/trystero) exchanges WebRTC connection offers through two public signalling networks at once: a fixed list of large Nostr relays and several BitTorrent WebSocket trackers. If one network is down or blocked, the other still connects you. The offers are encrypted with the room ID as the password, so relay operators can't read them. After that, all game traffic goes directly between phones over encrypted WebRTC data channels.
 3. **Authoritative host.** The person who created the game runs the rules engine (`src/game.js`) in their browser. Each player sends their actions (propose, vote, play a card…) to the host. The host validates them and sends every player a view personalised for them (`viewFor`). Your role and what you know only ever travel to your own phone, and nobody else's device receives them.
 4. **Identity.** Each phone keeps a random secret token in `localStorage`, and the host maps it to a public seat ID. That lets players reload or reconnect without losing their seat, and one player can't act as another.
 
 **Trade-off:** the host's browser holds the full game state, so a determined host could open dev tools and peek at roles. That's fine between friends. Fixing it properly would need a "mental poker" cryptographic protocol, which is a lot of complexity for a party game. If the host's phone goes to sleep, everyone waits until it comes back, and the app keeps the screen awake to help avoid that.
 
-If some phones can't connect (for example on strict carrier or corporate networks), put everyone on the same Wi-Fi, or add a TURN server via `turnConfig` in `src/net.js`.
+**If someone is stuck on "Seeking the host…",** that screen says which step is failing:
+
+- *Can't reach any signalling servers*: the network blocks them. Switch between Wi-Fi and mobile data.
+- *Waiting for the host's phone to answer*: the host's tab is closed or their screen is off.
+- *Couldn't open a direct connection*: the two networks won't allow a direct link (common on some mobile carriers). Put everyone on the same Wi-Fi, or add a TURN server via `turnConfig` in `src/net.js`.
+
+For troubleshooting you can force specific servers with `?relay=wss://…` (Nostr) and/or `?tracker=wss://…` (BitTorrent) in the URL.
 
 ## Development
 

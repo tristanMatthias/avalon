@@ -464,3 +464,10 @@ input:focus { border-color: var(--gold-lo); box-shadow: 0 0 0 3px #c9a44955; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ------------------------------------------------ connection diagnostics */
+.net-status { font-size: .9rem; color: var(--muted); font-style: italic; margin: 14px auto; max-width: 320px; }
+.net-err { font-size: .9rem; color: var(--evil-hi); margin: 0 auto 14px; max-width: 320px; }
+.signal { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: .85rem; color: #5a3f1a; margin: 0 0 8px; }
+.signal .dot { width: 9px; height: 9px; border-radius: 50%; background: #b0892c; animation: pulse 1.6s ease-in-out infinite; }
+.signal.ok .dot { background: #2f9e5b; animation: none; box-shadow: 0 0 6px #2f9e5b; }

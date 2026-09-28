@@ -61,6 +61,7 @@ export async function openSession(room, onChange) {
     error: null,
     kicked: false,
     name: me.name,
+    openedAt: Date.now(),
   }
   const emit = () => onChange(s)
   let flashTimer
@@ -162,6 +163,11 @@ export async function openSession(room, onChange) {
   s.close ??= () => net.leave()
   s.leave = () => { forgetRoom(room); s.close() }
   s.peerCount = () => net.peerCount()
+  s.stats = () => net.stats()
+  net.onError(d => {
+    s.netError = String(d?.error?.message ?? d?.error ?? 'Connection failed')
+    emit()
+  })
   emit()
   return s
 }

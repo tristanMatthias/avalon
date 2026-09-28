@@ -9,9 +9,10 @@ permissions:
   pages: write
   id-token: write
 
+# One run per branch; never cancel a deploy midway
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:

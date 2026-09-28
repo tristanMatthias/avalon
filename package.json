@@ -1,0 +1,20 @@
+{
+  "name": "avalon",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "morphdom": "^2.7.8",
+    "qrcode-generator": "^1.4.4",
+    "trystero": "0.25.4"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0"
+  }
+}

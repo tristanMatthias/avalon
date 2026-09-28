@@ -1,11 +1,13 @@
 // Transport layer. Two implementations with the same shape:
-//  - trystero: real WebRTC peer-to-peer. Peers find each other through public Nostr relays
-//              AND public BitTorrent WebSocket trackers at the same time (no server of our own),
-//              so one flaky signalling network doesn't stop a game.
-//  - local:    BroadcastChannel between tabs of one browser (for testing: add ?local to the URL)
+//  - hybrid: direct WebRTC between phones (found via public Nostr relays and BitTorrent trackers)
+//            plus an encrypted relay through public MQTT brokers for networks where direct
+//            connections fail. No server of our own.
+//  - local:  BroadcastChannel between tabs of one browser (for testing: add ?local to the URL)
 //
 // transport = { selfId, send(type, data, targetPeerId?), on(type, cb(data, peerId)),
 //               onPeerJoin(cb), onPeerLeave(cb), onError(cb), stats(), leave() }
+
+import { relayChannel, MQTT_BROKERS } from './relay.js'
 
 const APP_ID = 'avalon-p2p-game-v1'
 
@@ -31,69 +33,97 @@ const TORRENT_TRACKERS = [
 export async function connect(roomId) {
   const params = new URLSearchParams(location.search)
   if (params.has('local')) return localTransport(roomId)
-  return trysteroTransport(roomId, params.getAll('relay'), params.getAll('tracker'))
+  // ?relay=…, ?tracker=… and ?mqtt=… replace the default servers (testing / troubleshooting);
+  // pass "none" to switch a path off.
+  const pick = (key, defaults) => {
+    const custom = params.getAll(key)
+    return custom.length ? custom.filter(u => u !== 'none') : defaults
+  }
+  const custom = ['relay', 'tracker'].some(k => params.has(k))
+  return hybridTransport(roomId, {
+    nostr: custom ? pick('relay', []) : NOSTR_RELAYS,
+    torrent: custom ? pick('tracker', []) : TORRENT_TRACKERS,
+    mqtt: pick('mqtt', MQTT_BROKERS),
+  })
 }
 
-async function trysteroTransport(roomId, customRelays, customTrackers) {
+// Messages travel over direct WebRTC (when phones can connect directly) AND through the
+// encrypted MQTT relay (which works on any network). Each message carries an id, so whichever
+// copy arrives first wins and the other is dropped.
+async function hybridTransport(roomId, servers) {
   const [nostr, torrent] = await Promise.all([import('@trystero-p2p/nostr'), import('@trystero-p2p/torrent')])
-  // ?relay=wss://… and/or ?tracker=wss://… replace the defaults (testing / troubleshooting)
-  const custom = customRelays.length || customTrackers.length
-  const strategies = [
-    { lib: nostr, urls: custom ? customRelays : NOSTR_RELAYS },
-    { lib: torrent, urls: custom ? customTrackers : TORRENT_TRACKERS },
-  ].filter(x => x.urls.length)
+  const selfId = nostr.selfId
 
   const handlers = {}
   const joinCbs = []
   const leaveCbs = []
   const errorCbs = []
-  const peerRooms = new Map() // peerId -> Set of room entries it is reachable through
+  const seen = new Set()
+  const rtcPeers = new Map() // peerId -> Set of trystero room entries it is reachable through
+  const relayPeers = new Set()
+  const knownPeers = () => new Set([...rtcPeers.keys(), ...relayPeers])
 
-  const rooms = strategies.map(({ lib, urls }) => {
+  const deliver = (packet, peerId) => {
+    if (!packet || typeof packet !== 'object' || seen.has(packet.mid)) return
+    seen.add(packet.mid)
+    if (seen.size > 2000) seen.delete(seen.values().next().value)
+    handlers[packet.type]?.(packet.data, peerId)
+  }
+  const peerUp = (id, add) => {
+    const had = rtcPeers.has(id) || relayPeers.has(id)
+    add()
+    if (!had) joinCbs.forEach(cb => cb(id))
+  }
+  const peerDown = (id, remove) => {
+    remove()
+    if (!rtcPeers.has(id) && !relayPeers.has(id)) leaveCbs.forEach(cb => cb(id))
+  }
+
+  // ---- WebRTC via Trystero (Nostr + BitTorrent signalling)
+  const rooms = [
+    { lib: nostr, urls: servers.nostr },
+    { lib: torrent, urls: servers.torrent },
+  ].filter(x => x.urls.length).map(({ lib, urls }) => {
     const entry = { lib }
     // The room id doubles as the password, so relay operators can't read the connection offers.
     entry.room = lib.joinRoom({ appId: APP_ID, password: roomId, relayConfig: { urls, warnOnRelayFailure: false } }, roomId, {
       onJoinError: details => errorCbs.forEach(cb => cb(details)),
     })
     entry.msg = entry.room.makeAction('msg')
-    entry.msg.onMessage = (packet, { peerId }) => handlers[packet?.type]?.(packet.data, peerId)
-    entry.room.onPeerJoin = id => {
-      const set = peerRooms.get(id) ?? new Set()
-      const isNew = set.size === 0
-      set.add(entry)
-      peerRooms.set(id, set)
-      if (isNew) joinCbs.forEach(cb => cb(id))
-    }
-    entry.room.onPeerLeave = id => {
-      const set = peerRooms.get(id)
-      if (!set) return
-      set.delete(entry)
-      if (set.size === 0) {
-        peerRooms.delete(id)
-        leaveCbs.forEach(cb => cb(id))
-      }
-    }
+    entry.msg.onMessage = (packet, { peerId }) => deliver(packet, peerId)
+    entry.room.onPeerJoin = id => peerUp(id, () => rtcPeers.set(id, (rtcPeers.get(id) ?? new Set()).add(entry)))
+    entry.room.onPeerLeave = id => peerDown(id, () => {
+      const set = rtcPeers.get(id)
+      set?.delete(entry)
+      if (!set?.size) rtcPeers.delete(id)
+    })
     return entry
   })
 
+  // ---- Encrypted MQTT relay
+  const relay = servers.mqtt.length ? await relayChannel({ roomId, selfId, brokers: servers.mqtt }) : null
+  relay?.onMessage((packet, peerId) => deliver(packet, peerId))
+  relay?.onPeer(id => peerUp(id, () => relayPeers.add(id)))
+  relay?.onLeave(id => peerDown(id, () => relayPeers.delete(id)))
+
   const sendTo = (peerId, packet) => {
-    const entry = peerRooms.get(peerId)?.values().next().value
-    return entry?.msg.send(packet, { target: peerId }).catch(() => {})
+    const entry = rtcPeers.get(peerId)?.values().next().value
+    entry?.msg.send(packet, { target: peerId }).catch(() => {})
+    if (relayPeers.has(peerId)) relay.send(packet, peerId)
   }
 
   return {
-    selfId: nostr.selfId,
-    // Always send per-peer so a peer reachable over both networks gets each message once
+    selfId,
+    // Always addressed per-peer: each message is encrypted for its recipient only
     send: (type, data, target) => {
-      const packet = { type, data }
-      if (target) return sendTo(target, packet)
-      for (const id of peerRooms.keys()) sendTo(id, packet)
+      const packet = { mid: Math.random().toString(36).slice(2) + Date.now().toString(36), type, data }
+      for (const id of target ? [target] : knownPeers()) sendTo(id, packet)
     },
     on: (type, cb) => { handlers[type] = cb },
     onPeerJoin: cb => joinCbs.push(cb),
     onPeerLeave: cb => leaveCbs.push(cb),
     onError: cb => errorCbs.push(cb),
-    peerCount: () => peerRooms.size,
+    peerCount: () => knownPeers().size,
     stats: () => {
       let open = 0
       let total = 0
@@ -103,9 +133,19 @@ async function trysteroTransport(roomId, customRelays, customTrackers) {
           if (ws?.readyState === 1) open++
         }
       }
-      return { relaysOpen: open, relaysTotal: total, peers: peerRooms.size }
+      const r = relay?.stats() ?? { open: 0, total: 0 }
+      return {
+        relaysOpen: open + r.open,
+        relaysTotal: total + r.total,
+        brokersOpen: r.open,
+        peers: knownPeers().size,
+        direct: rtcPeers.size,
+      }
     },
-    leave: () => rooms.forEach(r => r.room.leave()),
+    leave: () => {
+      rooms.forEach(r => r.room.leave())
+      relay?.close()
+    },
   }
 }
 

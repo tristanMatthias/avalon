@@ -28,7 +28,11 @@ A mobile-first, peer-to-peer web version of **The Resistance: Avalon** for 5–1
 ```
 
 1. **Room link.** The game link is `https://…/#<room-id>`. The room ID is 10 random characters and never leaves the URL fragment, so it isn't sent to any web server.
-2. **Finding each other.** [Trystero](https://github.com/dmotz/trystero) exchanges WebRTC connection offers through two public signalling networks at once: a fixed list of large Nostr relays and several BitTorrent WebSocket trackers. If one network is down or blocked, the other still connects you. The offers are encrypted with the room ID as the password, so relay operators can't read them. After that, all game traffic goes directly between phones over encrypted WebRTC data channels.
+2. **Two message paths at once.**
+   - *Direct WebRTC:* [Trystero](https://github.com/dmotz/trystero) finds the other phones through public Nostr relays and BitTorrent WebSocket trackers, then connects them directly over encrypted WebRTC data channels.
+   - *Encrypted relay (`src/relay.js`):* the same messages also go through several public MQTT brokers over ordinary secure WebSockets. This works on networks where direct connections fail, such as mobile data or Wi-Fi that isolates devices.
+
+   Every message carries an ID, so whichever copy arrives first is used and the duplicate is dropped. Relay traffic is encrypted with a key derived from the room ID, so the brokers only see noise. Messages meant for one player, like their role or a quest card, are also encrypted with a key only the sender and that player share (ECDH), so the other players in the room can't read them either.
 3. **Authoritative host.** The person who created the game runs the rules engine (`src/game.js`) in their browser. Each player sends their actions (propose, vote, play a card…) to the host. The host validates them and sends every player a view personalised for them (`viewFor`). Your role and what you know only ever travel to your own phone, and nobody else's device receives them.
 4. **Identity.** Each phone keeps a random secret token in `localStorage`, and the host maps it to a public seat ID. That lets players reload or reconnect without losing their seat, and one player can't act as another.
 
@@ -40,7 +44,7 @@ A mobile-first, peer-to-peer web version of **The Resistance: Avalon** for 5–1
 - *Waiting for the host's phone to answer*: the host's tab is closed or their screen is off.
 - *Couldn't open a direct connection*: the two networks won't allow a direct link (common on some mobile carriers). Put everyone on the same Wi-Fi, or add a TURN server via `turnConfig` in `src/net.js`.
 
-For troubleshooting you can force specific servers with `?relay=wss://…` (Nostr) and/or `?tracker=wss://…` (BitTorrent) in the URL.
+For troubleshooting you can force specific servers in the URL with `?relay=wss://…` (Nostr), `?tracker=wss://…` (BitTorrent) or `?mqtt=wss://…` (relay). Use `none` to switch a path off. The build ID shown on the home and "Seeking the host…" screens tells you which version a phone has loaded.
 
 ## Development
 
@@ -67,6 +71,7 @@ The build uses relative paths, so it works at `https://<user>.github.io/<repo>/`
 | --- | --- |
 | `src/game.js` | Pure rules engine: roles, knowledge, voting, quests, Lady of the Lake, assassination, per-player views |
 | `src/session.js` | Host and client logic: authoritative state, personalised views, reconnection |
-| `src/net.js` | Transports: Trystero/Nostr WebRTC, or `BroadcastChannel` for local testing |
+| `src/net.js` | Transports: direct WebRTC and the encrypted relay combined, or `BroadcastChannel` for local testing |
+| `src/relay.js` | Minimal MQTT-over-WebSocket client with room and per-player (ECDH) encryption |
 | `src/main.js` | Mobile UI: lobby, round table, voting, quest cards and announcements |
 | `src/style.css`, `src/icons.js` | Arthurian theme, heraldry and icons |

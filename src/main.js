@@ -62,7 +62,7 @@ function screen() {
   if (session.kicked) return shell(`<div class="scroll center"><h2>You have been dismissed</h2><p>The host removed you from this table.</p><button class="btn" data-a="home">Return to Camelot</button></div>`)
   const v = session.view
   if (!session.isHost && !session.name) return joinScreen()
-  if (!v) return shell(`<div class="center-msg"><div class="spinner"></div><h2>Seeking the host…</h2><p>Connecting peer-to-peer. Make sure the person who created the game still has it open, with their screen on.</p>${netStatus()}<button class="btn ghost small" data-a="leave">Leave</button></div>`)
+  if (!v) return shell(`<div class="center-msg"><div class="spinner"></div><h2>Seeking the host…</h2><p>Connecting peer-to-peer. Make sure the person who created the game still has it open, with their screen on.</p>${netStatus()}<button class="btn ghost small" data-a="leave">Leave</button><p class="build">build ${__BUILD__}</p></div>`)
   syncUi(v)
   return v.phase === 'lobby' ? lobbyScreen(v) : gameScreen(v)
 }
@@ -80,11 +80,11 @@ function netStatus() {
       ? 'Contacting signalling servers…'
       : 'Can’t reach any signalling servers. Check your internet connection, or try mobile data instead of this Wi-Fi (some networks block them).'
   } else if (st.peers === 0) {
-    msg = `Connected to ${st.relaysOpen}/${st.relaysTotal} signalling servers. Waiting for the host’s phone to answer…`
+    msg = `Connected to ${st.relaysOpen}/${st.relaysTotal} servers. Waiting for the host’s phone to answer — is the game still open on it?`
   } else {
     msg = `Found ${st.peers} player${st.peers === 1 ? '' : 's'}, waiting for the host…`
   }
-  const err = session.netError ? `<p class="net-err">Found another player but couldn’t open a direct connection. Try putting everyone on the same Wi-Fi.</p>` : ''
+  const err = session.netError && !st.brokersOpen ? `<p class="net-err">Found another player but couldn’t open a direct connection. Try putting everyone on the same Wi-Fi.</p>` : ''
   return `<p class="net-status">${msg}</p>${err}`
 }
 
@@ -122,14 +122,15 @@ function homeScreen() {
     <details class="scroll rules">
       <summary>How to play</summary>
       ${rulesHtml()}
-    </details>`, 'home')
+    </details>
+    <p class="build">build ${__BUILD__}</p>`, 'home')
 }
 
 function hostSignal() {
   const st = session?.stats?.()
   if (!st || new URLSearchParams(location.search).has('local')) return ''
   const ok = st.relaysOpen > 0
-  return `<p class="signal ${ok ? 'ok' : 'bad'}"><span class="dot"></span>${ok ? `Open for players · ${st.relaysOpen}/${st.relaysTotal} signalling servers` : 'Connecting to signalling servers…'}</p>`
+  return `<p class="signal ${ok ? 'ok' : 'bad'}"><span class="dot"></span>${ok ? `Open for players · ${st.relaysOpen}/${st.relaysTotal} servers · ${st.peers} connected` : 'Connecting to servers…'}</p>`
 }
 
 function joinScreen() {
